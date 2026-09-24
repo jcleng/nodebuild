@@ -1,0 +1,107 @@
+name: RUN
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'GitHub 项目地址'
+        required: true
+        default: 'https://github.com/jcleng/jellyfin-web'
+      branch:
+        description: '分支'
+        required: true
+        default: 'main'
+      node_version:
+        description: 'Node.js 版本'
+        required: true
+        default: 'node26'
+        type: choice
+        options:
+          - 'node18'
+          - 'node20'
+          - 'node22'
+          - 'node24'
+          - 'node26'
+      build_command:
+        description: '构建命令'
+        required: true
+        default: 'npm install && npm run build:production'
+      dist_dir:
+        description: '构建产物dist目录'
+        required: true
+        default: 'dist'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Prepare env
+      run: |
+        NODE_VERSION="${{ github.event.inputs.node_version }}"
+        NODE_VERSION="${NODE_VERSION#node}"
+        echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
+
+        REPO_URL="${{ github.event.inputs.repo_url }}"
+        PROJECT_NAME="$(basename "${REPO_URL%/}")"
+        PROJECT_NAME="${PROJECT_NAME%.git}"
+        echo "PROJECT_NAME=$PROJECT_NAME" >> "$GITHUB_ENV"
+
+        echo "FILE_DATE=$(date +'%Y%m%d%H%M%S')" >> "$GITHUB_ENV"
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Clone project
+      run: |
+        git clone --depth 1 -b "${{ github.event.inputs.branch }}" "${{ github.event.inputs.repo_url }}" src/project
+
+    - name: Build
+      run: |
+        cd src/project
+        eval "${{ github.event.inputs.build_command }}"
+
+    - name: Package dist
+      run: |
+        cd src/project
+        if [ ! -d "${{ github.event.inputs.dist_dir }}" ]; then
+          echo "错误: dist目录不存在 -> ${{ github.event.inputs.dist_dir }}"
+          exit 1
+        fi
+        zip -q -r "${{ github.workspace }}/dist_${{ env.PROJECT_NAME }}.zip" "${{ github.event.inputs.dist_dir }}"
+
+    - name: Package source
+      run: |
+        cd src/project
+        zip -q -r "${{ github.workspace }}/src_${{ env.PROJECT_NAME }}.zip" . \
+          -x "node_modules/*" -x "*/node_modules/*" -x ".git/*"
+
+    - name: Write release info
+      run: |
+        {
+          echo "repo_url: ${{ github.event.inputs.repo_url }}"
+          echo "branch: ${{ github.event.inputs.branch }}"
+          echo "node_version: ${{ github.event.inputs.node_version }}"
+          echo "build_command: ${{ github.event.inputs.build_command }}"
+          echo "dist_dir: ${{ github.event.inputs.dist_dir }}"
+          echo "file_date: ${{ env.FILE_DATE }}"
+          echo ""
+          sha256sum dist_${{ env.PROJECT_NAME }}.zip src_${{ env.PROJECT_NAME }}.zip
+          echo ""
+          ls -la dist_${{ env.PROJECT_NAME }}.zip src_${{ env.PROJECT_NAME }}.zip
+        } > release.txt
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.FILE_DATE }}_${{ env.PROJECT_NAME }}
+        name: ${{ env.PROJECT_NAME }}_${{ env.FILE_DATE }}
+        body_path: release.txt
+        files: |
+          release.txt
+          dist_${{ env.PROJECT_NAME }}.zip
+          src_${{ env.PROJECT_NAME }}.zip
