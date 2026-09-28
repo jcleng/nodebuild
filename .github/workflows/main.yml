@@ -11,7 +11,7 @@ on:
       branch:
         description: '分支'
         required: true
-        default: 'main'
+        default: 'artplayer'
       node_version:
         description: 'Node.js 版本'
         required: true
