@@ -1,1 +1,0 @@
-实现对node项目clone然后进行构建,然后把构建结果dist目录进行打包zip,上传到Release
